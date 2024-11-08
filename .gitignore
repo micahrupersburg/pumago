@@ -1,0 +1,4 @@
+bin/
+*.iml
+.idea
+resources/credentials.json
