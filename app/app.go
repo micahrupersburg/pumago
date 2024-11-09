@@ -1,8 +1,6 @@
 package app
 
 import (
-	"encoding/json"
-	"github.com/gorilla/websocket"
 	"github.com/sashabaranov/go-openai"
 	"log"
 	"pumago/content"
@@ -11,25 +9,21 @@ import (
 )
 
 type App struct {
-	Index        index.Index
-	DB           content.DB
-	Sources      []content.Source
-	ContentQueue chan content.Content
-	ScrapeEvery  time.Duration
-	OpenAIClient *openai.Client
-	WebSockets   WebSockets
-}
-
-type WebSockets struct {
-	Upgrader    websocket.Upgrader
-	Connections []*websocket.Conn
+	Index         index.Index
+	DB            content.DB
+	Sources       []content.Source
+	ContentQueue  chan content.Content
+	ScrapeEvery   time.Duration
+	OpenAIClient  *openai.Client
+	MyApiKey      string
+	WebServerPort int
 }
 
 func (app *App) Run() {
-	log.Printf("Starting Index")
-	////err := app.Index.Launch()
-	////if err != nil {
-	////	log.Fatalf("Failed to launch index: %v", err)
+	//log.Printf("Starting Index")
+	//err := app.Index.Launch()
+	//if err != nil {
+	//	log.Fatalf("Failed to launch index: %v", err)
 	//}
 
 	// Start a worker to process the queue
@@ -45,12 +39,13 @@ func (app *App) scrape() {
 	log.Println("Fetching content from sources")
 	var dirty = false
 	for _, source := range app.Sources {
+		log.Println("Fetching content from %s", source.Origin())
 		contents, err := source.FetchContent()
 		if err != nil {
-			log.Printf("Failed to fetch contents: %v from source %v", err, source)
+			log.Printf("Failed to fetch contents: %v from source %s", err, source.Origin())
 			return
 		}
-		log.Printf("Fetched %d contents from source %v", len(contents), source)
+		log.Printf("Fetched %d contents from source %s", len(contents), source.Origin())
 		for _, data := range contents {
 			dirty = true
 			app.ContentQueue <- data
@@ -83,10 +78,7 @@ func (app *App) processQueue() {
 			log.Printf("Failed to add content to database: %v", err)
 			continue
 		}
-		err = app.SendDocsToWebSockets(data)
-		if err != nil {
-			log.Printf("Failed to add content to web sockets: %v", err)
-		}
+
 		err = app.Index.Add(data)
 		if err != nil {
 			log.Printf("Failed to add content to index: %v", err)
@@ -101,26 +93,4 @@ func (app *App) processQueue() {
 		}
 	}
 
-}
-
-type WebSocketEvent struct {
-	Created content.Content   `json:"data"`
-	Matches []content.Content `json:"matches"`
-}
-
-func (app *App) SendDocsToWebSockets(data content.Content) error {
-	if data.Origin != content.AUDIO && data.Origin != content.CHAT {
-		return nil
-	}
-	responseData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	for _, conn := range app.WebSockets.Connections {
-		err := conn.WriteMessage(websocket.TextMessage, responseData)
-		if err != nil {
-			log.Printf("Failed to write message: %v", err)
-		}
-	}
-	return nil
 }

@@ -1,6 +1,7 @@
 package index
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -14,8 +15,11 @@ import (
 
 func fork(binary string, args []string) error {
 	cmd := exec.Command(binary, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if flag.Lookup("verbose").Value.String() == "true" {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+
 	log.Printf("Launching LLama: %v", cmd)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid: true,

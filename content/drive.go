@@ -28,7 +28,9 @@ func DefaultDrive() *Drive {
 	}
 	return &Drive{PageSize: 10, Service: srv}
 }
-
+func (c *Drive) Origin() Origin {
+	return GOOGLE_DRIVE
+}
 func (d *Drive) FetchContent() ([]Content, error) {
 	r, err := d.Files.List().PageSize(d.PageSize).Fields("files(*)").Q("trashed=false").OrderBy("viewedByMeTime desc, name").Do()
 	if err != nil {

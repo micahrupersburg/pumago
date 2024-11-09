@@ -25,3 +25,8 @@ clean-db:
 
 statics:
 	cp resources/credentials.json $(BIN_DIR)/
+
+tidy:
+	go mod tidy
+run: build
+	$(BIN_DIR)/pumago

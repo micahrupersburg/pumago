@@ -1,9 +1,8 @@
 package main
 
 import (
-	"github.com/gorilla/websocket"
+	"flag"
 	"github.com/sashabaranov/go-openai"
-	"net/http"
 	"os"
 	"pumago/app"
 	"pumago/content"
@@ -12,24 +11,26 @@ import (
 )
 
 func main() {
+	flag.Bool("verbose", false, "enable verbose logging")
+	flag.Parse()
+
+	sources := make([]content.Source, 0)
+	//[]content.Source{content.DefaultDrive()}, // , content.SafariBrowser(), content.ChromeBrowser()},
+	//sources = append(sources, content.SafariBrowser())
+	//for _, browser := range content.AllChromeProfiles() {
+	//	sources = append(sources, browser)
+	//}
+	sources = append(sources, content.DefaultDrive())
 
 	app := app.App{
-		Index:        index.DefaultIndex(),
-		Sources:      []content.Source{content.DefaultDrive()}, // , content.SafariBrowser(), content.ChromeBrowser()},
-		ScrapeEvery:  5 * time.Minute,
-		ContentQueue: make(chan content.Content, 1000),
-		OpenAIClient: openai.NewClient(os.Getenv("OPENAI_API_KEY")),
-		DB:           content.DefaultDB(),
-		WebSockets: app.WebSockets{
-			Upgrader: websocket.Upgrader{
-				ReadBufferSize:  1024,
-				WriteBufferSize: 1024,
-				CheckOrigin: func(r *http.Request) bool {
-					return true
-				},
-			},
-			Connections: make([]*websocket.Conn, 0),
-		},
+		Index:         index.DefaultIndex(),
+		Sources:       sources,
+		ScrapeEvery:   5 * time.Minute,
+		ContentQueue:  make(chan content.Content, 1000),
+		OpenAIClient:  openai.NewClient(os.Getenv("OPENAI_API_KEY")),
+		DB:            content.DefaultDB(),
+		MyApiKey:      "123456",
+		WebServerPort: 8888,
 	}
 
 	app.Run()
