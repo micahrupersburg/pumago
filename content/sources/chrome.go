@@ -1,9 +1,10 @@
-package content
+package sources
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"pumago/content"
 	"runtime"
 )
 
@@ -42,7 +43,7 @@ WHERE
 ORDER BY 
     last_visit_time DESC
 LIMIT 100;`,
-		origin: CHROME,
+		origin: content.CHROME,
 	}
 }
 

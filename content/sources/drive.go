@@ -1,10 +1,12 @@
-package content
+package sources
 
 import (
 	"context"
 	"fmt"
 	"io"
 	"log"
+	"pumago/content"
+	"strconv"
 	"time"
 
 	"google.golang.org/api/drive/v3"
@@ -28,15 +30,26 @@ func DefaultDrive() *Drive {
 	}
 	return &Drive{PageSize: 10, Service: srv}
 }
-func (c *Drive) Origin() Origin {
-	return GOOGLE_DRIVE
+func (d *Drive) Origin() content.Origin {
+	return content.GOOGLE_DRIVE
 }
-func (d *Drive) FetchContent() ([]Content, error) {
-	r, err := d.Files.List().PageSize(d.PageSize).Fields("files(*)").Q("trashed=false").OrderBy("viewedByMeTime desc, name").Do()
+func (d *Drive) FetchContent(state map[string]string) ([]content.Content, error) {
+	var lastRead int64 = 0
+	stateKey := "last_read"
+	stateValue, ok := state[stateKey]
+	if ok {
+		lastRead, _ = strconv.ParseInt(stateValue, 10, 64)
+	}
+	now := time.Now().Unix()
+	query := "trashed=false"
+	if lastRead > 0 {
+		query += fmt.Sprintf(" and viewedByMeTime > '%s'", fmt.Sprintf(time.Unix(lastRead, 0).Format(time.RFC3339)))
+	}
+	r, err := d.Files.List().PageSize(d.PageSize).Fields("files(*)").Q("trashed=false and viewedByMeTime > '2017-06-01T12:00:00'").OrderBy("viewedByMeTime desc, name").Do()
 	if err != nil {
 		log.Fatalf("Unable to retrieve files: %v", err)
 	}
-	out := make([]Content, 0)
+	out := make([]content.Content, 0)
 	fmt.Println("Files:")
 	for _, i := range r.Files {
 		file, err := d.downloadFile(i)
@@ -46,10 +59,11 @@ func (d *Drive) FetchContent() ([]Content, error) {
 			out = append(out, *file)
 		}
 	}
+	state[stateKey] = fmt.Sprintf("%d", now)
 	return out, nil
 }
 
-func (d *Drive) downloadFile(file *drive.File) (*Content, error) {
+func (d *Drive) downloadFile(file *drive.File) (*content.Content, error) {
 	res, err := d.Files.Export(file.Id, "text/plain").Download()
 	if err != nil {
 		return nil, fmt.Errorf("Unable to download file: %v", err)
@@ -73,12 +87,12 @@ func (d *Drive) downloadFile(file *drive.File) (*Content, error) {
 		viewedByMeTime = time.Now()
 	}
 	fmt.Printf("Downloaded %s\n", file.Name)
-	entry := Content{
+	entry := content.Content{
 		ID:                 file.Id,
 		URL:                file.WebViewLink,
 		Title:              file.Name,
 		LastModifiedMillis: viewedByMeTime.Unix(),
-		Origin:             GOOGLE_DRIVE,
+		Origin:             content.GOOGLE_DRIVE,
 		Content:            contentStr,
 	}
 

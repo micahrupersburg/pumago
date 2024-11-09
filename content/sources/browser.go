@@ -1,4 +1,4 @@
-package content
+package sources
 
 import (
 	"database/sql"
@@ -8,6 +8,8 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"pumago/content"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,12 +17,11 @@ import (
 type Browser struct {
 	historyPath string
 	//maxHistory  int
-	query    string
-	origin   Origin
-	lastread int64
+	query  string
+	origin content.Origin
 }
 
-func (c *Browser) Origin() Origin {
+func (c *Browser) Origin() content.Origin {
 	return c.origin
 }
 
@@ -54,7 +55,7 @@ var skipPrefixes = []string{
 }
 
 // FetchHistory loads the browser history from the database.
-func (c *Browser) doHistoryQuery() ([]HistoryItem, error) {
+func (c *Browser) doHistoryQuery(lastRead int64) ([]HistoryItem, error) {
 	// Copy history file to a temporary location.
 	tmpHistory, err := c.CopyHistoryToTemp()
 
@@ -70,7 +71,7 @@ func (c *Browser) doHistoryQuery() ([]HistoryItem, error) {
 	}
 	defer db.Close()
 
-	sqlQuery := strings.ReplaceAll(c.query, "?", fmt.Sprintf("%d", c.lastread))
+	sqlQuery := strings.ReplaceAll(c.query, "?", fmt.Sprintf("%d", lastRead))
 	//log.Printf("Using query:", sqlQuery)
 
 	rows, err := db.Query(sqlQuery)
@@ -86,7 +87,7 @@ func (c *Browser) doHistoryQuery() ([]HistoryItem, error) {
 		if err := rows.Scan(&item.title, &item.url, &item.lastVisitTime); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
-		if item.lastVisitTime <= c.lastread {
+		if item.lastVisitTime <= lastRead {
 			continue
 		}
 		skip := false
@@ -102,12 +103,20 @@ func (c *Browser) doHistoryQuery() ([]HistoryItem, error) {
 	}
 	return entries, nil
 }
-func (c *Browser) FetchContent() ([]Content, error) {
-	history, err := c.doHistoryQuery()
+func (c *Browser) FetchContent(state map[string]string) ([]content.Content, error) {
+	var lastRead int64 = 0
+	stateKey := "last_read"
+	stateValue, ok := state[stateKey]
+	if ok {
+		lastRead, _ = strconv.ParseInt(stateValue, 10, 64)
+	}
+
+	now := time.Now().Unix()
+	history, err := c.doHistoryQuery(lastRead)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch history: %w", err)
 	}
-	entries := make([]Content, 0)
+	entries := make([]content.Content, 0)
 	for _, item := range history {
 		log.Printf("Downloading content %s", item.url)
 		data, err := c.download(item.url)
@@ -115,7 +124,7 @@ func (c *Browser) FetchContent() ([]Content, error) {
 			log.Printf("Failed to download content %s: %v", item.url, err)
 			return nil, fmt.Errorf("failed to download content %s: %w", item.url, err)
 		}
-		entry := Content{
+		entry := content.Content{
 			ID:                 item.url,
 			URL:                item.url,
 			Title:              item.title,
@@ -127,6 +136,6 @@ func (c *Browser) FetchContent() ([]Content, error) {
 	}
 
 	fmt.Println("Done loading links from history.")
-	c.lastread = time.Now().Unix()
+	state[stateKey] = fmt.Sprintf("%d", now)
 	return entries, nil
 }

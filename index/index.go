@@ -10,45 +10,56 @@ import (
 	"pumago/config"
 	"pumago/content"
 	"strconv"
+	"time"
 )
 
 type Index struct {
-	collection string
-	embed      chromem.EmbeddingFunc
-	port       int
-	*chromem.DB
+	port         int
+	collection   *chromem.Collection
 	maxChunkSize int
+	db           *chromem.DB
+	SaveOnDirty  bool
+	Thresh       float32
 }
 
+var dirtyCount int
 var dbFile = filepath.Join(config.Dir(), "vectors.db")
 
-func (index *Index) Collection() *chromem.Collection {
-	return index.GetCollection(index.collection, index.embed)
+func Clean() {
+	log.Printf("Cleaning index")
+	err := os.Remove(dbFile)
+	if err != nil {
+		log.Printf("Failed to remove db file: %v", err)
+	}
 }
 func DefaultIndex() Index {
-
 	db := chromem.NewDB()
-	index := Index{
-		collection:   "puma-all",
-		embed:        chromem.NewEmbeddingFuncOpenAI(os.Getenv("OPENAI_API_KEY"), "text-embedding-3-small"),
-		port:         9991,
-		DB:           db,
-		maxChunkSize: 1024,
-	}
-
+	embed := chromem.NewEmbeddingFuncOpenAI(os.Getenv("OPENAI_API_KEY"), "text-embedding-3-small")
+	collectionName := "puma-all"
+	var collection *chromem.Collection
 	if _, err := os.Stat(dbFile); !os.IsNotExist(err) {
 		err = db.ImportFromFile(dbFile, "")
 		if err != nil {
 			log.Fatalf("Failed to read db file: %v", err)
 		}
-		if index.Collection() == nil {
-			log.Fatalf("Reading index failed due to collection %s not found", index.collection)
+		collection = db.GetCollection(collectionName, embed)
+	}
+	if collection == nil {
+		var err error
+		collection, err = db.CreateCollection(collectionName, make(map[string]string), embed)
+		if err != nil {
+			log.Fatalf("failed to create index collection %s", collectionName)
 		}
 	}
-	_, err := index.CreateCollection(index.collection, make(map[string]string), index.embed)
-	if err != nil {
-		log.Fatalf("failed to create index collection %s", index.collection)
+
+	index := Index{
+		collection:   collection,
+		port:         9991,
+		db:           db,
+		maxChunkSize: 1024,
+		Thresh:       0.2,
 	}
+
 	return index
 }
 
@@ -56,7 +67,7 @@ func DefaultIndex() Index {
 func (index *Index) Query(query string, limit int) ([]content.Content, error) {
 	ctx := context.Background()
 	out := make([]content.Content, 0)
-	c := index.GetCollection(index.collection, index.embed)
+	c := index.collection
 	if c == nil {
 		log.Printf("collection does not exist")
 		return out, nil
@@ -68,15 +79,25 @@ func (index *Index) Query(query string, limit int) ([]content.Content, error) {
 		log.Printf("no documents in collection or limit is 0")
 		return out, nil
 	}
-
+	var min float32 = 1.0
+	var max float32 = 0.0
 	docRes, err := c.Query(ctx, query, limit, nil, nil)
 
 	for _, res := range docRes {
-		out = append(out, docToContent(res.ID, res.Content, res.Metadata))
+
 		//if res.Similarity > 0.7 {
-		log.Printf("Document %+v (similarity: %f):", res.Metadata, res.Similarity)
+		if res.Similarity > index.Thresh {
+			out = append(out, docToContent(res.ID, res.Content, res.Metadata))
+		}
+		if res.Similarity < min {
+			min = res.Similarity
+		}
+		if res.Similarity > max {
+			max = res.Similarity
+		}
 		//}
 	}
+	log.Printf("Min similarity: %f, Max similarity: %f filtered out %d", min, max, len(docRes)-len(out))
 
 	if err != nil {
 		return nil, fmt.Errorf("Failed to query: %v", err)
@@ -108,6 +129,7 @@ func (index *Index) doc(doc content.Content) []chromem.Document {
 			"Fragment":           fmt.Sprintf("%d", doc.Fragment),
 			"Origin":             doc.Origin.String(),
 			"Status":             doc.Status.String(),
+			"URL":                doc.URL,
 		},
 	})
 }
@@ -124,16 +146,51 @@ func docToContent(id string, docContent string, metadata map[string]string) cont
 		Fragment:           fragment,
 		Origin:             origin,
 		Status:             status,
+		URL:                metadata["URL"],
 	}
 }
 func (index *Index) Add(data content.Content) error {
 	ctx := context.Background()
-	c, err := index.GetOrCreateCollection(index.collection, nil, index.embed)
-	if err != nil {
-		log.Fatalf("Failed to get collection: %v", err)
+	c := index.collection
+	docs := index.doc(data)
+	err := c.AddDocuments(ctx, docs, 1)
+	if err == nil {
+		dirtyCount += len(docs)
+		if dirtyCount > 100 {
+			err = index.SaveIfDirty()
+		}
 	}
-	return c.AddDocuments(ctx, index.doc(data), 1)
+	return err
+}
+
+func (index *Index) SaveIfDirty() error {
+	if dirtyCount == 0 || !index.SaveOnDirty {
+		return nil
+	}
+	return index.Save()
 }
 func (index *Index) Save() error {
-	return index.DB.ExportToFile(dbFile, false, "")
+	log.Printf("Saving index %d", index.collection.Count())
+	err := index.db.ExportToFile(dbFile, false, "", index.collection.Name)
+	if err == nil {
+		dirtyCount = 0
+	}
+	return err
+}
+func (index *Index) StartAutoSaver() {
+	index.SaveOnDirty = true
+	index.SaveIfDirty() //just in case its already dirty
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			err := index.SaveIfDirty()
+			if err != nil {
+				log.Printf("Failed to save index: %v", err)
+			}
+		}
+	}
+
 }

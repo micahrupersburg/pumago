@@ -30,3 +30,8 @@ tidy:
 	go mod tidy
 run: build
 	$(BIN_DIR)/pumago
+run-ro: build
+	$(BIN_DIR)/pumago --nosource
+
+run-rebuild: build
+	$(BIN_DIR)/pumago --rebuild-index

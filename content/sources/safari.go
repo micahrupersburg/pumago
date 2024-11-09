@@ -1,8 +1,9 @@
-package content
+package sources
 
 import (
 	"os"
 	"path/filepath"
+	"pumago/content"
 )
 
 func SafariBrowser() *Browser {
@@ -28,6 +29,6 @@ WHERE
 
 ORDER BY visit_time DESC 
 LIMIT 100;`,
-		origin: SAFARI,
+		origin: content.SAFARI,
 	}
 }

@@ -31,6 +31,7 @@ func (s Origin) String() string {
 	return [...]string{"UNKNOWN", "CHROME", "SAFARI", "GOOGLE_DRIVE", "AUDIO", "CHAT"}[s]
 }
 func ParseOrigin(input string) (Origin, error) {
+	input = strings.ToLower(input)
 	switch input {
 	case "chrome":
 		return CHROME, nil
@@ -40,6 +41,8 @@ func ParseOrigin(input string) (Origin, error) {
 		return AUDIO, nil
 	case "chat":
 		return CHAT, nil
+	case "google_drive":
+		return GOOGLE_DRIVE, nil
 	default:
 		return UNKNOWN, fmt.Errorf("invalid origin: %s", input)
 	}
@@ -58,7 +61,7 @@ func ParseStatus(input string) (Status, error) {
 }
 
 type Source interface {
-	FetchContent() ([]Content, error)
+	FetchContent(state map[string]string) ([]Content, error)
 	Origin() Origin
 }
 
@@ -74,8 +77,13 @@ type Content struct {
 	Status             Status `json:"status"`
 }
 
+func (c Content) Shrink() Content {
+	c.Content = regexp.MustCompile("\\s+").ReplaceAllString(c.Content, " ")
+	return c
+}
 func (c Content) Markdown() string {
-	return fmt.Sprintf("[%s: %s](%s)\n\n%s\n\n", c.Origin, c.Title, c.URL, c.Content)
+	oname := strings.Replace(strings.ToLower(c.Origin.String()), "_", " ", -1)
+	return fmt.Sprintf("**%s:** [%s Link](%s)\n\n**Content:**\n%s\n\n", c.Title, oname, c.URL, c.Content)
 }
 
 // ConvertURLToFilename converts a URL to a Unix-compatible filename.
